@@ -1,69 +1,65 @@
-'use strict';
-
 import {
   NativeModules,
-  DeviceEventEmitter,
+  NativeEventEmitter,
 } from 'react-native';
+
+import { createErrorFromErrorData } from './utils';
 
 const RNAdMobRewarded = NativeModules.RNAdMobRewarded;
 
-const eventHandlers = {
-  rewardedVideoDidRewardUser: new Map(),
-  rewardedVideoDidLoad: new Map(),
-  rewardedVideoDidFailToLoad: new Map(),
-  rewardedVideoDidOpen: new Map(),
-  rewardedVideoDidClose: new Map(),
-  rewardedVideoWillLeaveApplication: new Map(),
+const eventEmitter = new NativeEventEmitter(RNAdMobRewarded);
+
+const eventMap = {
+  adLoaded: 'rewardedVideoAdLoaded',
+  adFailedToLoad: 'rewardedVideoAdFailedToLoad',
+  adOpened: 'rewardedVideoAdOpened',
+  adClosed: 'rewardedVideoAdClosed',
+  adLeftApplication: 'rewardedVideoAdLeftApplication',
+  rewarded: 'rewardedVideoAdRewarded',
+  videoStarted: 'rewardedVideoAdVideoStarted',
 };
 
-const addEventListener = (type, handler) => {
-  switch (type) {
-    case 'rewardedVideoDidRewardUser':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, (type, amount) => {
-        handler(type, amount);
-      }));
-      break;
-    case 'rewardedVideoDidLoad':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, handler));
-      break;
-    case 'rewardedVideoDidFailToLoad':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, (error) => { handler(error); }));
-      break;
-    case 'rewardedVideoDidOpen':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, handler));
-      break;
-    case 'rewardedVideoDidClose':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, handler));
-      break;
-    case 'rewardedVideoWillLeaveApplication':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, handler));
-      break;
-    default:
-      console.log(`Event with type ${type} does not exist.`);
+const _subscriptions = new Map();
+
+const addEventListener = (event, handler) => {
+  const mappedEvent = eventMap[event];
+  if (mappedEvent) {
+    let listener;
+    if (event === 'adFailedToLoad') {
+      listener = eventEmitter.addListener(mappedEvent, error => handler(createErrorFromErrorData(error)));
+    } else {
+      listener = eventEmitter.addListener(mappedEvent, handler);
+    }
+    _subscriptions.set(handler, listener);
+    return {
+      remove: () => removeEventListener(event, handler)
+    };
+  } else {
+    console.warn(`Trying to subscribe to unknown event: "${event}"`);
+    return {
+      remove: () => {},
+    };
   }
-}
+};
 
 const removeEventListener = (type, handler) => {
-  if (!eventHandlers[type].has(handler)) {
+  const listener = _subscriptions.get(handler);
+  if (!listener) {
     return;
   }
-  eventHandlers[type].get(handler).remove();
-  eventHandlers[type].delete(handler);
-}
-
-const removeAllListeners = () => {
-  DeviceEventEmitter.removeAllListeners('rewardedVideoDidRewardUser');
-  DeviceEventEmitter.removeAllListeners('rewardedVideoDidLoad');
-  DeviceEventEmitter.removeAllListeners('rewardedVideoDidFailToLoad');
-  DeviceEventEmitter.removeAllListeners('rewardedVideoDidOpen');
-  DeviceEventEmitter.removeAllListeners('rewardedVideoDidClose');
-  DeviceEventEmitter.removeAllListeners('rewardedVideoWillLeaveApplication');
+  listener.remove();
+  _subscriptions.delete(handler);
 };
 
-module.exports = {
+const removeAllListeners = () => {
+  _subscriptions.forEach((listener, key, map) => {
+    listener.remove();
+    map.delete(key);
+  });
+};
+
+export default {
   ...RNAdMobRewarded,
-  requestAd: (cb = () => {}) => RNAdMobRewarded.requestAd(cb), // requestAd callback is optional
-  showAd: (cb = () => {}) => RNAdMobRewarded.showAd(cb),       // showAd callback is optional
   addEventListener,
   removeEventListener,
   removeAllListeners,
