@@ -1,71 +1,58 @@
-'use strict';
-
 import {
   NativeModules,
-  DeviceEventEmitter,
+  NativeEventEmitter,
 } from 'react-native';
+
+import { createErrorFromErrorData } from './utils';
 
 const RNAdMobInterstitial = NativeModules.RNAdMobInterstitial;
 
-const eventHandlers = {
-  interstitialDidLoad: new Map(),
-  interstitialDidFailToLoad: new Map(),
-  interstitialDidOpen: new Map(),
-  interstitialDidClose: new Map(),
-  interstitialWillLeaveApplication: new Map(),
+const eventEmitter = new NativeEventEmitter(RNAdMobInterstitial);
+
+const eventMap = {
+  adLoaded: 'interstitialAdLoaded',
+  adFailedToLoad: 'interstitialAdFailedToLoad',
+  adOpened: 'interstitialAdOpened',
+  adClosed: 'interstitialAdClosed',
+  adLeftApplication: 'interstitialAdLeftApplication',
 };
 
-const addEventListener = (type, handler) => {
-  switch (type) {
-    case 'interstitialDidLoad':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, handler));
-      break;
-    case 'interstitialDidFailToLoad':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, (error) => { handler(error); }));
-      break;
-    case 'interstitialDidOpen':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, handler));
-      break;
-    case 'interstitialDidClose':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, handler));
-      break;
-    case 'interstitialWillLeaveApplication':
-      eventHandlers[type].set(handler, DeviceEventEmitter.addListener(type, handler));
-      break;
-    default:
-      console.log(`Event with type ${type} does not exist.`);
+const _subscriptions = new Map();
+
+const addEventListener = (event, handler) => {
+  const mappedEvent = eventMap[event];
+  if (mappedEvent) {
+    let listener;
+    if (event === 'adFailedToLoad') {
+      listener = eventEmitter.addListener(mappedEvent, error => handler(createErrorFromErrorData(error)));
+    } else {
+      listener = eventEmitter.addListener(mappedEvent, handler);
+    }
+    _subscriptions.set(handler, listener);
+    return {
+      remove: () => removeEventListener(event, handler)
+    };
+  } else {
+    console.warn(`Trying to subscribe to unknown event: "${event}"`);
+    return {
+      remove: () => {},
+    };
   }
-}
+};
 
 const removeEventListener = (type, handler) => {
-  if (!eventHandlers[type].has(handler)) {
+  const listener = _subscriptions.get(handler);
+  if (!listener) {
     return;
   }
-  eventHandlers[type].get(handler).remove();
-  eventHandlers[type].delete(handler);
-}
-
-const removeAllListeners = () => {
-  DeviceEventEmitter.removeAllListeners('interstitialDidLoad');
-  DeviceEventEmitter.removeAllListeners('interstitialDidFailToLoad');
-  DeviceEventEmitter.removeAllListeners('interstitialDidOpen');
-  DeviceEventEmitter.removeAllListeners('interstitialDidClose');
-  DeviceEventEmitter.removeAllListeners('interstitialWIllLeaveApplication');
+  listener.remove();
+  _subscriptions.delete(handler);
 };
 
-// replaces deprecated API
-const tryShowNewInterstitial = (testID) => {
-  console.warn(`tryShowNewInterstitial method is deprecated and will be removed in the next major release, please use requestAd() and showAd() directly.\n\nExample: AdMobInterstitial.requestAd(AdMobInterstitial.showAd)`);
-  if (testID) {
-    RNAdMobInterstitial.setTestDeviceID(testID);
-  }
-
-  RNAdMobInterstitial.isReady((isReady) => {
-    if (isReady) {
-      RNAdMobInterstitial.showAd(() => {});
-    } else {
-      RNAdMobInterstitial.requestAd(() => RNAdMobInterstitial.showAd(() => {}));
-    }
+const removeAllListeners = () => {
+  _subscriptions.forEach((listener, key, map) => {
+    listener.remove();
+    map.delete(key);
   });
 };
 
@@ -103,22 +90,16 @@ const setTargetingData = (targetingData) => {
   location && setLocation(location);
 };
 
-module.exports = {
+
+export default {
   ...RNAdMobInterstitial,
-  requestAd: (cb = () => {}) => RNAdMobInterstitial.requestAd(cb), // requestAd callback is optional
-  showAd: (cb = () => {}) => RNAdMobInterstitial.showAd(cb),       // showAd callback is optional
   setTargetingData,
   setGender,
   setBirthday,
   setLocation,
   setChildDirected,
   setContentUrl,
-  tryShowNewInterstitial,
   addEventListener,
   removeEventListener,
   removeAllListeners,
-  setAdUnitId: (id) => {
-    RNAdMobInterstitial.setAdUnitID(id);
-    console.warn(`setAdUnitId will be deprecated soon. Please use setAdUnitID instead.`);
-  },
 };
